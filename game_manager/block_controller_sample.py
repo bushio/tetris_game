@@ -4,7 +4,7 @@
 from datetime import datetime
 import pprint
 import copy
-
+import numpy as np
 class Block_Controller(object):
 
     # init parameter
@@ -14,11 +14,41 @@ class Block_Controller(object):
     ShapeNone_index = 0
     CurrentShape_class = 0
     NextShape_class = 0
+    def __init__(self):
+        #state_dim =  #direction_range
+        self.get_board_width = 10
+        self.get_board_height = 5
+        self.direction_dim = 4
+        self.condition1_dim = 2 #current ,next
+        self.condition2_dim = self.condition1_dim  + 1  #current ,next,direction
 
+        self.filed_dim = self.get_board_width * self.get_board_height
+
+        self.observation1_space_dim = self.condition1_dim + self.filed_dim
+        self.observation2_space_dim = self.condition2_dim + self.filed_dim
+
+
+        self.action_space_1_dim = self.direction_dim #decide a direction
+        self.action_space_2_dim = self.get_board_width #decide a x
+
+
+        #initialize_array
+        self.observation1_space = np.zeros([self.observation1_space_dim,1]) #52,1
+        self.observation2_space = np.zeros([self.observation2_space_dim,1]) #53,1
+
+        self.param_action1 = np.random.rand(self.observation1_space_dim, self.action_space_1_dim)  #52x4
+        self.param_action2 = np.random.rand(self.observation2_space_dim, self.action_space_2_dim)  #53x10
+
+        self.action1_list = []
+        self.action2_list = []
+        self.reward_list = []
+        self.score_list = []
+
+        self.score = 0
     # GetNextMove is main function.
     # input
     #    nextMove : nextMove structure which is empty.
-    #    GameStatus : block/field/judge/debug information. 
+    #    GameStatus : block/field/judge/debug information.
     #                 in detail see the internal GameStatus data.
     # output
     #    nextMove : nextMove structure which includes next shape position and the other.
@@ -27,9 +57,20 @@ class Block_Controller(object):
         t1 = datetime.now()
 
         # print GameStatus
-        print("=================================================>")
-        pprint.pprint(GameStatus, width = 61, compact = True)
 
+        board_width = GameStatus["field_info"]["width"]
+        board_height = GameStatus["field_info"]["height"]
+        print("=================================================>")
+        #pprint.pprint(GameStatus, width = 61, compact = True)
+        print("line score %f"%(GameStatus["debug_info"]["linescore"]))
+        print("block index %f"%(GameStatus["judge_info"]["block_index"]))
+        print("block index %f"%(GameStatus["judge_info"]["block_index"]))
+        print("backboard:")
+        print(GameStatus["field_info"]["backboard"])
+        print("field_shape:")
+        print(board_height,board_width)
+        reshape_backboard = self.get_reshape_backboard(GameStatus["field_info"]["backboard"],board_height,board_width)
+        #self.get_backboard_n_lines(GameStatus["field_info"]["backboard"],self.get_board_height)
         # get data from GameStatus
         # current shape info
         CurrentShapeDirectionRange = GameStatus["block_info"]["currentShape"]["direction_range"]
@@ -57,6 +98,8 @@ class Block_Controller(object):
 
                 # evaluate board
                 EvalValue = self.calcEvaluationValueSample(board)
+                #print(EvalValue)
+
                 # update best move
                 if EvalValue > LatestEvalValue:
                     strategy = (direction0, x0, 1, 1)
@@ -82,6 +125,17 @@ class Block_Controller(object):
         print("###### SAMPLE CODE ######")
         return nextMove
 
+    def get_reshape_backboard(self,backboard,height,width):
+        backboard = np.array(backboard)
+        reshape_backboard = backboard.reshape(height,width)
+        return reshape_backboard
+
+    def get_backboard_n_lines(self,backboard,n):
+        backboard_one_line = np.sum(backboard,axis=1)
+        index = np.where(backboard_one_line>0)
+        print(index)
+
+
     def getSearchXRange(self, Shape_class, direction):
         #
         # get x range from shape direction.
@@ -99,7 +153,7 @@ class Block_Controller(object):
         return coordArray
 
     def getBoard(self, board_backboard, Shape_class, direction, x):
-        # 
+        #
         # get new board.
         #
         # copy backboard data to make new board.
@@ -108,11 +162,12 @@ class Block_Controller(object):
         _board = self.dropDown(board, Shape_class, direction, x)
         return _board
 
+
     def dropDown(self, board, Shape_class, direction, x):
-        # 
+        #
         # internal function of getBoard.
         # -- drop down the shape on the board.
-        # 
+        #
         dy = self.board_data_height - 1
         coordArray = self.getShapeCoordArray(Shape_class, direction, x, 0)
         # update dy
@@ -220,7 +275,7 @@ class Block_Controller(object):
 
         # calc Evaluation Value
         score = 0
-        score = score + fullLines * 10.0           # try to delete line 
+        score = score + fullLines * 10.0           # try to delete line
         score = score - nHoles * 1.0               # try not to make hole
         score = score - nIsolatedBlocks * 1.0      # try not to make isolated block
         score = score - absDy * 1.0                # try to put block smoothly
@@ -234,4 +289,3 @@ class Block_Controller(object):
 
 
 BLOCK_CONTROLLER_SAMPLE = Block_Controller()
-
