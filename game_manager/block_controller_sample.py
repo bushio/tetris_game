@@ -33,6 +33,9 @@ class Block_Controller(object):
 
 
         #initialize_array
+        self.condition_vec1 =np.zeros(self.condition1_dim)
+        self.condition_vec2 =np.zeros(self.condition2_dim)
+
         self.observation1_space = np.zeros([self.observation1_space_dim,1]) #52,1
         self.observation2_space = np.zeros([self.observation2_space_dim,1]) #53,1
 
@@ -63,18 +66,26 @@ class Block_Controller(object):
         print("=================================================>")
         #pprint.pprint(GameStatus, width = 61, compact = True)
         print("line score %f"%(GameStatus["debug_info"]["linescore"]))
-        print("block index %f"%(GameStatus["judge_info"]["block_index"]))
-        print("block index %f"%(GameStatus["judge_info"]["block_index"]))
         print("backboard:")
         print(GameStatus["field_info"]["backboard"])
         print("field_shape:")
         print(board_height,board_width)
+
+        current_shape_index =GameStatus["block_info"]["currentShape"]["index"]
+        next_shape_index =GameStatus["block_info"]["nextShape"]["index"]
+        print("current_shape_index %d"%(current_shape_index))
+        print("next_shape_index %d"%(next_shape_index))
         reshape_backboard = self.get_reshape_backboard(GameStatus["field_info"]["backboard"],board_height,board_width)
         reshape_backboard_nlines = self.get_backboard_n_lines(reshape_backboard,self.get_board_height)
 
         print(reshape_backboard_nlines)
-        flatten_backboard_nlines= reshape_backboard_nlines.flatten()
-        #print(flatten_backboard_nlines)
+        backboard_nlines = reshape_backboard_nlines.flatten()
+
+        self.condition_vec2[0] = current_shape_index
+        self.condition_vec2[1] = next_shape_index
+        #elf.condition_vec2[2] = 3
+        #backboard_nlines_with_condition =np.append(self.condition_vec2,backboard_nlines)
+        #print(backboard_nlines_with_condition)
         #exit()
         #self.get_backboard_n_lines(GameStatus["field_info"]["backboard"],self.get_board_height)
         # get data from GameStatus
@@ -95,9 +106,16 @@ class Block_Controller(object):
         strategy = None
         LatestEvalValue = -100000
         # search with current block Shape
+
         for direction0 in CurrentShapeDirectionRange:
+            self.condition_vec2[2] = direction0
+            backboard_nlines_with_condition =np.append(self.condition_vec2,backboard_nlines) #1x53
+            self.observation2_space = backboard_nlines_with_condition.reshape(-1,1)
+            #print(self.observation2_space)
             # search with x range
             x0Min, x0Max = self.getSearchXRange(self.CurrentShape_class, direction0)
+
+
             for x0 in range(x0Min, x0Max):
                 # get board data, as if dropdown block
                 board = self.getBoard(self.board_backboard, self.CurrentShape_class, direction0, x0)
@@ -111,17 +129,7 @@ class Block_Controller(object):
                     strategy = (direction0, x0, 1, 1)
                     LatestEvalValue = EvalValue
 
-                ###test
-                ###for direction1 in NextShapeDirectionRange:
-                ###  x1Min, x1Max = self.getSearchXRange(self.NextShape_class, direction1)
-                ###  for x1 in range(x1Min, x1Max):
-                ###        board2 = self.getBoard(board, self.NextShape_class, direction1, x1)
-                ###        EvalValue = self.calcEvaluationValueSample(board2)
-                ###        if EvalValue > LatestEvalValue:
-                ###            strategy = (direction0, x0, 1, 1)
-                ###            LatestEvalValue = EvalValue
         # search best nextMove <--
-
         print("===", datetime.now() - t1)
         nextMove["strategy"]["direction"] = strategy[0]
         nextMove["strategy"]["x"] = strategy[1]
