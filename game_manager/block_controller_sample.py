@@ -70,6 +70,8 @@ class Block_Controller(object):
         print("field_shape:")
         print(board_height,board_width)
         reshape_backboard = self.get_reshape_backboard(GameStatus["field_info"]["backboard"],board_height,board_width)
+        reshape_backboard_nlines = self.get_backboard_n_lines(reshape_backboard,self.get_board_height)
+        print(reshape_backboard_nlines)
         #self.get_backboard_n_lines(GameStatus["field_info"]["backboard"],self.get_board_height)
         # get data from GameStatus
         # current shape info
@@ -131,10 +133,18 @@ class Block_Controller(object):
         return reshape_backboard
 
     def get_backboard_n_lines(self,backboard,n):
+        backboard = np.where(backboard>0,1,0)
         backboard_one_line = np.sum(backboard,axis=1)
-        index = np.where(backboard_one_line>0)
-        print(index)
+        h,w = backboard.shape
+        index = np.where(backboard_one_line>0)[0]
+        if len(index)==0:
+            backboard_nline = backboard[h-n:h,:]
+        else:
 
+            top_index=index[0]
+            top_index = h-n if top_index+n > h else top_index
+            backboard_nline = backboard[top_index:top_index+n,:]
+        return backboard_nline
 
     def getSearchXRange(self, Shape_class, direction):
         #
