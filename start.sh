@@ -3,7 +3,7 @@
 ## default value
 VALUE_L="1"
 IS_MANUAL_CONTROLL="n"
-IS_SAMPLE_CONTROLL="n"
+IS_SAMPLE_CONTROLL="y"
 GAME_TIME="180"                  # game time (s)
 RESULT_LOG_JSON="result.json"    # result log file
 
