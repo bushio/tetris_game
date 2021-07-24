@@ -71,7 +71,11 @@ class Block_Controller(object):
         print(board_height,board_width)
         reshape_backboard = self.get_reshape_backboard(GameStatus["field_info"]["backboard"],board_height,board_width)
         reshape_backboard_nlines = self.get_backboard_n_lines(reshape_backboard,self.get_board_height)
+
         print(reshape_backboard_nlines)
+        flatten_backboard_nlines= reshape_backboard_nlines.flatten()
+        #print(flatten_backboard_nlines)
+        #exit()
         #self.get_backboard_n_lines(GameStatus["field_info"]["backboard"],self.get_board_height)
         # get data from GameStatus
         # current shape info
