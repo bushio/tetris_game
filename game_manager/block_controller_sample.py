@@ -16,6 +16,7 @@ class Block_Controller(object):
     NextShape_class = 0
     def __init__(self):
         #state_dim =  #direction_range
+        self.max_point = 1300
         self.get_board_width = 10
         self.get_board_height = 5
         self.direction_dim = 4
@@ -48,6 +49,10 @@ class Block_Controller(object):
         self.score_list = []
 
         self.score = 0
+        self.episode_iter = 0
+        self.episode_num = 0
+        self.episode_reward = 0.0
+        self.line_score = 0.0
     # GetNextMove is main function.
     # input
     #    nextMove : nextMove structure which is empty.
@@ -58,36 +63,48 @@ class Block_Controller(object):
     def GetNextMove(self, nextMove, GameStatus):
 
         t1 = datetime.now()
-
-        # print GameStatus
-
         board_width = GameStatus["field_info"]["width"]
         board_height = GameStatus["field_info"]["height"]
-        print("=================================================>")
-        #pprint.pprint(GameStatus, width = 61, compact = True)
-        print("line score %f"%(GameStatus["debug_info"]["linescore"]))
-        print("backboard:")
-        print(GameStatus["field_info"]["backboard"])
-        print("field_shape:")
-        print(board_height,board_width)
-
+        game_over_count = GameStatus["judge_info"]["gameover_count"]
         current_shape_index =GameStatus["block_info"]["currentShape"]["index"]
         next_shape_index =GameStatus["block_info"]["nextShape"]["index"]
-        print("current_shape_index %d"%(current_shape_index))
-        print("next_shape_index %d"%(next_shape_index))
         reshape_backboard = self.get_reshape_backboard(GameStatus["field_info"]["backboard"],board_height,board_width)
         reshape_backboard_nlines = self.get_backboard_n_lines(reshape_backboard,self.get_board_height)
-
-        print(reshape_backboard_nlines)
         backboard_nlines = reshape_backboard_nlines.flatten()
+
+        #update parameter
+        if self.episode_num < game_over_count:
+            print(">>>>Change episode")
+            self.episode_num = game_over_count
+            self.episode_score = 0.0
+            self.episode_iter = 0
+        prev_point = GameStatus["debug_info"]["linescore"] - self.line_score
+        prev_reward =prev_point/self.max_point
+
+        if self.episode_iter >0:
+            self.episode_reward += prev_reward
+            self.line_score = GameStatus["debug_info"]["linescore"]
+
+
+        # print GameStatus
+        print("=================================================>")
+        #pprint.pprint(GameStatus, width = 61, compact = True)
+        print("epsiode num: %d"%(self.episode_num ))
+        print("epsiode iter: %d"%(self.episode_iter))
+        print("reward: %f"%(prev_reward))
+        print("line score %f"%(GameStatus["debug_info"]["linescore"]))
+        print("backboard_nlines:")
+        print(reshape_backboard_nlines)
+        #print(GameStatus["field_info"]["backboard"])
+        print("field_shape:")
+        #print(board_height,board_width)
+        print("current_shape_index %d"%(current_shape_index))
+        print("next_shape_index %d"%(next_shape_index))
+        #print(reshape_backboard_nlines)
 
         self.condition_vec2[0] = current_shape_index
         self.condition_vec2[1] = next_shape_index
-        #elf.condition_vec2[2] = 3
-        #backboard_nlines_with_condition =np.append(self.condition_vec2,backboard_nlines)
-        #print(backboard_nlines_with_condition)
-        #exit()
-        #self.get_backboard_n_lines(GameStatus["field_info"]["backboard"],self.get_board_height)
+
         # get data from GameStatus
         # current shape info
         CurrentShapeDirectionRange = GameStatus["block_info"]["currentShape"]["direction_range"]
@@ -110,8 +127,11 @@ class Block_Controller(object):
         for direction0 in CurrentShapeDirectionRange:
             self.condition_vec2[2] = direction0
             backboard_nlines_with_condition =np.append(self.condition_vec2,backboard_nlines) #1x53
-            self.observation2_space = backboard_nlines_with_condition.reshape(-1,1)
-            #print(self.observation2_space)
+            self.observation2_space = backboard_nlines_with_condition #reshape(-1,1)
+            probs = self.get_policy(self.observation2_space,self.param_action2)
+            action = np.random.choice(self.action_space_2_dim ,1,p=probs)[0]
+            #print(probs,action)
+
             # search with x range
             x0Min, x0Max = self.getSearchXRange(self.CurrentShape_class, direction0)
 
@@ -137,7 +157,16 @@ class Block_Controller(object):
         nextMove["strategy"]["y_moveblocknum"] = strategy[3]
         print(nextMove)
         print("###### SAMPLE CODE ######")
+        self.episode_iter += 1
         return nextMove
+
+    def softmax(self,x):
+        x = np.exp(x - np.max(x))
+        return x / x.sum()
+
+    def get_policy(self,state, theta):
+        z = np.dot(theta.T,state)
+        return self.softmax(z)
 
     def get_reshape_backboard(self,backboard,height,width):
         backboard = np.array(backboard)
