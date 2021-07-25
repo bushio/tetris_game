@@ -16,7 +16,8 @@ class Block_Controller(object):
     NextShape_class = 0
     def __init__(self):
         #state_dim =  #direction_range
-        self.max_point = 1300
+        self.point_list = [0.0,100.0,300.0,700.0,1300.0]
+        self.max_point = np.max(self.point_list)
         self.get_board_width = 10
         self.get_board_height = 5
         self.direction_dim = 4
@@ -125,7 +126,7 @@ class Block_Controller(object):
         strategy = None
         LatestEvalValue = -100000
         # search with current block Shape
-
+        max_reward = -1
         for direction0 in CurrentShapeDirectionRange:
             self.condition_vec2[2] = direction0
             backboard_nlines_with_condition =np.append(self.condition_vec2,backboard_nlines) #1x53
@@ -144,16 +145,21 @@ class Block_Controller(object):
                 reshape_backboard_next = self.get_reshape_backboard(board,board_height,board_width)
                 reshape_backboard_next = np.where(reshape_backboard_next>0,1,0)
                 #print(reshape_backboard_next)
+                reshape_backboard_next = self.get_backboard_n_lines(reshape_backboard_next,self.get_board_height)
                 eval_board_h= self.eval_continuous_block_horizontal(reshape_backboard_next)
                 eval_board_v = self.eval_continuous_block_vertical(reshape_backboard_next)
+                fillline = int(self.get_fulllines(reshape_backboard_next))
+                reward = self.point_list[fillline]/self.max_point
+                #print(reward)
                 #print(eval_board_h)
-                EvalValue= np.sum(eval_board_h) #+ self.alpha * np.mean(eval_board_v)
-                print(eval)
+                #EvalValue= np.sum(eval_board_h) #+ self.alpha * np.mean(eval_board_v)
+                #print(EvalValue)
                 #score_next = self.calcEvaluationValue(reshape_backboard_next)
                 # evaluate board
-                #EvalValue = self.calcEvaluationValueSample(board)
+                EvalValue = self.calcEvaluationValueSample(board)
                 #print(EvalValue)
-
+                if reward>max_reward:
+                    max_reward = reward
                 # update best move
                 if EvalValue > LatestEvalValue:
                     strategy = (direction0, x0, 1, 1)
@@ -166,14 +172,20 @@ class Block_Controller(object):
         nextMove["strategy"]["y_operation"] = strategy[2]
         nextMove["strategy"]["y_moveblocknum"] = strategy[3]
         print(nextMove)
+        print(max_reward)
         print("###### SAMPLE CODE ######")
         self.episode_iter += 1
         return nextMove
 
-    def eval_continuous_block_horizontal(self,board):
+    #def eval_continuous_block_horizontal(self,board):
+    def get_fulllines(self,board):
+        h,w = board.shape
+        sum_value = np.sum(board,axis=1)
+        lines = np.sum(np.where(sum_value==w,1,0))
+        return lines
+
 
     def eval_continuous_block_horizontal(self,board):
-        #board = np.random.randint(0,2,(5,12))
         h,w = board.shape
         right_shift = np.roll(board,1)
         right_shift[:,0]=board[:,0]
@@ -185,8 +197,6 @@ class Block_Controller(object):
         return eval_board
 
     def eval_continuous_block_vertical(self,board):
-        board = np.random.randint(0,2,(5,12))
-        print(board)
         h,w = board.shape
         down_shift = np.roll(board,1,axis=0)
         down_shift[0,:]=board[0,:]
