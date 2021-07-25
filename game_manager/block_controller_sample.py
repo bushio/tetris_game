@@ -53,6 +53,7 @@ class Block_Controller(object):
         self.episode_num = 0
         self.episode_reward = 0.0
         self.line_score = 0.0
+        self.alpha = 0.5
     # GetNextMove is main function.
     # input
     #    nextMove : nextMove structure which is empty.
@@ -144,12 +145,14 @@ class Block_Controller(object):
                 reshape_backboard_next = np.where(reshape_backboard_next>0,1,0)
                 #print(reshape_backboard_next)
                 eval_board_h= self.eval_continuous_block_horizontal(reshape_backboard_next)
+                eval_board_v = self.eval_continuous_block_vertical(reshape_backboard_next)
                 #print(eval_board_h)
-                print(np.mean(eval_board_h))
+                EvalValue= np.sum(eval_board_h) #+ self.alpha * np.mean(eval_board_v)
+                print(eval)
                 #score_next = self.calcEvaluationValue(reshape_backboard_next)
                 # evaluate board
-                EvalValue = self.calcEvaluationValueSample(board)
-                print(EvalValue)
+                #EvalValue = self.calcEvaluationValueSample(board)
+                #print(EvalValue)
 
                 # update best move
                 if EvalValue > LatestEvalValue:
@@ -168,6 +171,8 @@ class Block_Controller(object):
         return nextMove
 
     def eval_continuous_block_horizontal(self,board):
+
+    def eval_continuous_block_horizontal(self,board):
         #board = np.random.randint(0,2,(5,12))
         h,w = board.shape
         right_shift = np.roll(board,1)
@@ -176,8 +181,20 @@ class Block_Controller(object):
         left_shift[:,-1]=board[:,-1]
         eval_board =  (board + right_shift + left_shift)/3.0
         eval_board[board==0] =0
+        #eval_board[eval_board<0.5] =0
         return eval_board
 
+    def eval_continuous_block_vertical(self,board):
+        board = np.random.randint(0,2,(5,12))
+        print(board)
+        h,w = board.shape
+        down_shift = np.roll(board,1,axis=0)
+        down_shift[0,:]=board[0,:]
+        up_shift = np.roll(board,-1,axis=0)
+        up_shift[-1,:]=board[-1,:]
+        eval_board =  (board + down_shift + up_shift)/3.0
+        eval_board[board==0] =0
+        return eval_board
 
     def calcEvaluationValue(self,board):
         score = 0
