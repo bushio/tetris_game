@@ -69,6 +69,7 @@ class Block_Controller(object):
         current_shape_index =GameStatus["block_info"]["currentShape"]["index"]
         next_shape_index =GameStatus["block_info"]["nextShape"]["index"]
         reshape_backboard = self.get_reshape_backboard(GameStatus["field_info"]["backboard"],board_height,board_width)
+        reshape_backboard = np.where(reshape_backboard>0,1,0)
         reshape_backboard_nlines = self.get_backboard_n_lines(reshape_backboard,self.get_board_height)
         backboard_nlines = reshape_backboard_nlines.flatten()
 
@@ -139,10 +140,16 @@ class Block_Controller(object):
             for x0 in range(x0Min, x0Max):
                 # get board data, as if dropdown block
                 board = self.getBoard(self.board_backboard, self.CurrentShape_class, direction0, x0)
-
+                reshape_backboard_next = self.get_reshape_backboard(board,board_height,board_width)
+                reshape_backboard_next = np.where(reshape_backboard_next>0,1,0)
+                #print(reshape_backboard_next)
+                eval_board_h= self.eval_continuous_block_horizontal(reshape_backboard_next)
+                #print(eval_board_h)
+                print(np.mean(eval_board_h))
+                #score_next = self.calcEvaluationValue(reshape_backboard_next)
                 # evaluate board
                 EvalValue = self.calcEvaluationValueSample(board)
-                #print(EvalValue)
+                print(EvalValue)
 
                 # update best move
                 if EvalValue > LatestEvalValue:
@@ -160,6 +167,23 @@ class Block_Controller(object):
         self.episode_iter += 1
         return nextMove
 
+    def eval_continuous_block_horizontal(self,board):
+        #board = np.random.randint(0,2,(5,12))
+        h,w = board.shape
+        right_shift = np.roll(board,1)
+        right_shift[:,0]=board[:,0]
+        left_shift = np.roll(board,-1)
+        left_shift[:,-1]=board[:,-1]
+        eval_board =  (board + right_shift + left_shift)/3.0
+        eval_board[board==0] =0
+        return eval_board
+
+
+    def calcEvaluationValue(self,board):
+        score = 0
+        board_sum = np.sum(board,axis=1)
+
+
     def softmax(self,x):
         x = np.exp(x - np.max(x))
         return x / x.sum()
@@ -168,24 +192,23 @@ class Block_Controller(object):
         z = np.dot(theta.T,state)
         return self.softmax(z)
 
-    def get_reshape_backboard(self,backboard,height,width):
-        backboard = np.array(backboard)
-        reshape_backboard = backboard.reshape(height,width)
-        return reshape_backboard
+    def get_reshape_backboard(self,board,height,width):
+        board = np.array(board)
+        reshape_board = board.reshape(height,width)
+        return reshape_board
 
-    def get_backboard_n_lines(self,backboard,n):
-        backboard = np.where(backboard>0,1,0)
-        backboard_one_line = np.sum(backboard,axis=1)
-        h,w = backboard.shape
-        index = np.where(backboard_one_line>0)[0]
+    def get_backboard_n_lines(self,board,n):
+        board_one_line = np.sum(board,axis=1)
+        h,w = board.shape
+        index = np.where(board_one_line>0)[0]
         if len(index)==0:
-            backboard_nline = backboard[h-n:h,:]
+            board_nline = board[h-n:h,:]
         else:
 
             top_index=index[0]
             top_index = h-n if top_index+n > h else top_index
-            backboard_nline = backboard[top_index:top_index+n,:]
-        return backboard_nline
+            board_nline = board[top_index:top_index+n,:]
+        return board_nline
 
     def getSearchXRange(self, Shape_class, direction):
         #
@@ -328,7 +351,7 @@ class Block_Controller(object):
         score = 0
         score = score + fullLines * 10.0           # try to delete line
         score = score - nHoles * 1.0               # try not to make hole
-        score = score - nIsolatedBlocks * 1.0      # try not to make isolated block
+        #score = score - nIsolatedBlocks * 1.0      # try not to make isolated block
         score = score - absDy * 1.0                # try to put block smoothly
         #score = score - maxDy * 0.3                # maxDy
         #score = score - maxHeight * 5              # maxHeight
