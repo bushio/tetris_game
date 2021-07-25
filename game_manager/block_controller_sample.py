@@ -127,18 +127,32 @@ class Block_Controller(object):
         LatestEvalValue = -100000
         # search with current block Shape
         max_reward = -1
+        decided_direction0 = 0
+        decided_state = 0
+        decided_prob = 0
         for direction0 in CurrentShapeDirectionRange:
-            self.condition_vec2[2] = direction0
+            self.condition_vec2[-1] = direction0
             backboard_nlines_with_condition =np.append(self.condition_vec2,backboard_nlines) #1x53
             self.observation2_space = backboard_nlines_with_condition #reshape(-1,1)
-            probs = self.get_policy(self.observation2_space,self.param_action2)
-            action = np.random.choice(self.action_space_2_dim ,1,p=probs)[0]
-            #print(probs,action)
-
-            # search with x range
             x0Min, x0Max = self.getSearchXRange(self.CurrentShape_class, direction0)
-
-
+            probs = self.get_policy(self.observation2_space,self.param_action2)
+            probs[:x0Min]=0
+            probs[x0Max:]=0
+            probs /=np.sum(probs)
+            decided_x0 = np.random.choice(self.action_space_2_dim ,1,p=probs)[0]
+            board = self.getBoard(self.board_backboard, self.CurrentShape_class, direction0, decided_x0)
+            board_next = self.get_reshape_backboard(board,board_height,board_width)
+            board_next = np.where(board_next>0,1,0)
+            board_next_nlines = self.get_backboard_n_lines(board_next,self.get_board_height)
+            fillline = int(self.get_fulllines(board_next_nlines))
+            reward = self.point_list[fillline]/self.max_point
+            if max_reward < reward:
+                max_reward = reward
+                decided_direction0 = direction0
+                decided_state = board_next_nlines.flatten()
+                decided_prob = probs
+            #
+            """
             for x0 in range(x0Min, x0Max):
                 # get board data, as if dropdown block
                 board = self.getBoard(self.board_backboard, self.CurrentShape_class, direction0, x0)
@@ -146,24 +160,51 @@ class Block_Controller(object):
                 reshape_backboard_next = np.where(reshape_backboard_next>0,1,0)
                 #print(reshape_backboard_next)
                 reshape_backboard_next = self.get_backboard_n_lines(reshape_backboard_next,self.get_board_height)
-                eval_board_h= self.eval_continuous_block_horizontal(reshape_backboard_next)
-                eval_board_v = self.eval_continuous_block_vertical(reshape_backboard_next)
-                fillline = int(self.get_fulllines(reshape_backboard_next))
-                reward = self.point_list[fillline]/self.max_point
-                #print(reward)
-                #print(eval_board_h)
-                #EvalValue= np.sum(eval_board_h) #+ self.alpha * np.mean(eval_board_v)
-                #print(EvalValue)
-                #score_next = self.calcEvaluationValue(reshape_backboard_next)
-                # evaluate board
+                #eval_board_h= self.eval_continuous_block_horizontal(reshape_backboard_next)
+                #eval_board_v = self.eval_continuous_block_vertical(reshape_backboard_next)
                 EvalValue = self.calcEvaluationValueSample(board)
                 #print(EvalValue)
-                if reward>max_reward:
-                    max_reward = reward
                 # update best move
                 if EvalValue > LatestEvalValue:
                     strategy = (direction0, x0, 1, 1)
                     LatestEvalValue = EvalValue
+            """
+
+        #=====get gradient=====
+        strategy = (decided_direction0, decided_x0, 1, 1)
+        self.condition_vec2[-1] = decided_direction0
+        decided_state_with_condition = np.append(self.condition_vec2,decided_state)
+        x0Min, x0Max = self.getSearchXRange(self.CurrentShape_class, strategy[0])
+        decided_state_with_condition = self.to_one_hot(decided_state_with_condition,
+                                                    decided_x0,
+                                                    self.observation2_space_dim ,
+                                                    self.action_space_2_dim)
+
+
+        expect = 0
+        for x0 in range(x0Min, x0Max):
+            board_for_expect = self.getBoard(self.board_backboard, self.CurrentShape_class, strategy[0], x0)
+            board_for_expect = self.get_reshape_backboard(board_for_expect,board_height,board_width)
+            board_for_expect  = np.where(board_for_expect >0,1,0)
+            board_for_expect_nlines = self.get_backboard_n_lines(board_for_expect,self.get_board_height)
+            state_for_expect = board_for_expect_nlines.flatten()
+            state_for_expect_with_condition = np.append(self.condition_vec2,state_for_expect)
+            state_for_expect_with_condition = self.to_one_hot(state_for_expect_with_condition,
+                                                    x0,
+                                                    self.observation2_space_dim ,
+                                                    self.action_space_2_dim)
+
+            expect += decided_prob[x0] * state_for_expect_with_condition
+        grad = decided_state_with_condition - expect
+
+
+        #=====get reward=====
+        decided_board = self.getBoard(self.board_backboard, self.CurrentShape_class, strategy[0], strategy[1])
+        reshape_backboard_next = self.get_reshape_backboard(decided_board,board_height,board_width)
+        reshape_backboard_next = np.where(reshape_backboard_next>0,1,0)
+        fillline = int(self.get_fulllines(reshape_backboard_next))
+        reward = self.point_list[fillline]/self.max_point
+
 
         # search best nextMove <--
         print("===", datetime.now() - t1)
@@ -178,6 +219,12 @@ class Block_Controller(object):
         return nextMove
 
     #def eval_continuous_block_horizontal(self,board):
+    def to_one_hot(self,s, a,s_dim ,a_dim):
+        onehot = np.zeros([s_dim, a_dim])
+        onehot[:, a] = s
+        return onehot
+
+
     def get_fulllines(self,board):
         h,w = board.shape
         sum_value = np.sum(board,axis=1)
