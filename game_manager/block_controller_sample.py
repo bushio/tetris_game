@@ -43,17 +43,17 @@ class Block_Controller(object):
 
         self.param_action1 = np.random.rand(self.observation1_space_dim, self.action_space_1_dim)  #52x4
         self.param_action2 = np.random.rand(self.observation2_space_dim, self.action_space_2_dim)  #53x10
-
-        self.action1_list = []
-        self.action2_list = []
+        #self.action1_list = []
+        #self.action2_list = []
+        self.gradient_list = []
         self.reward_list = []
+        self.gradient_list = []
         self.score_list = []
 
-        self.score = 0
+        self.episode_score = 0
         self.episode_iter = 0
         self.episode_num = 0
         self.episode_reward = 0.0
-        self.line_score = 0.0
         self.alpha = 0.5
     # GetNextMove is main function.
     # input
@@ -78,23 +78,19 @@ class Block_Controller(object):
         #update parameter
         if self.episode_num < game_over_count:
             print(">>>>Change episode")
+            self.score_list.append(self.episode_score)
             self.episode_num = game_over_count
             self.episode_score = 0.0
             self.episode_iter = 0
-        prev_point = GameStatus["debug_info"]["linescore"] - self.line_score
-        prev_reward =prev_point/self.max_point
-
-        if self.episode_iter >0:
-            self.episode_reward += prev_reward
-            self.line_score = GameStatus["debug_info"]["linescore"]
-
+            self.reward_list = []
+            self.gradient_list = []
+            #exit()
 
         # print GameStatus
         print("=================================================>")
         #pprint.pprint(GameStatus, width = 61, compact = True)
         print("epsiode num: %d"%(self.episode_num ))
         print("epsiode iter: %d"%(self.episode_iter))
-        print("reward: %f"%(prev_reward))
         print("line score %f"%(GameStatus["debug_info"]["linescore"]))
         print("backboard_nlines:")
         print(reshape_backboard_nlines)
@@ -196,15 +192,17 @@ class Block_Controller(object):
 
             expect += decided_prob[x0] * state_for_expect_with_condition
         grad = decided_state_with_condition - expect
-
+        self.gradient_list.append(grad)
 
         #=====get reward=====
         decided_board = self.getBoard(self.board_backboard, self.CurrentShape_class, strategy[0], strategy[1])
         reshape_backboard_next = self.get_reshape_backboard(decided_board,board_height,board_width)
         reshape_backboard_next = np.where(reshape_backboard_next>0,1,0)
         fillline = int(self.get_fulllines(reshape_backboard_next))
-        reward = self.point_list[fillline]/self.max_point
 
+        reward = self.point_list[fillline]/self.max_point
+        self.episode_score += self.point_list[fillline]
+        self.reward_list.append(reward)
 
         # search best nextMove <--
         print("===", datetime.now() - t1)
