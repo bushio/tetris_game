@@ -58,7 +58,6 @@ class Game_Manager(QMainWindow):
         self.isPaused = False
         self.nextMove = None
         self.lastShape = Shape.shapeNone
-
         self.game_time = -1
         self.block_index = 0
         self.manual = None
@@ -195,6 +194,7 @@ class Game_Manager(QMainWindow):
 
                 if self.use_sample == "y":
                     self.nextMove = BLOCK_CONTROLLER_SAMPLE.GetNextMove(nextMove, GameStatus)
+
                 else:
                     self.nextMove = BLOCK_CONTROLLER.GetNextMove(nextMove, GameStatus)
 
@@ -215,7 +215,7 @@ class Game_Manager(QMainWindow):
                 while BOARD_DATA.currentDirection != next_direction and k < 4:
                     ret = BOARD_DATA.rotateRight()
                     if ret == False:
-                        print("cannot rotateRight")
+                        #print("cannot rotateRight")
                         break
                     k += 1
                 # x operation
@@ -224,12 +224,12 @@ class Game_Manager(QMainWindow):
                     if BOARD_DATA.currentX > next_x:
                         ret = BOARD_DATA.moveLeft()
                         if ret == False:
-                            print("cannot moveLeft")
+                            #print("cannot moveLeft")
                             break
                     elif BOARD_DATA.currentX < next_x:
                         ret = BOARD_DATA.moveRight()
                         if ret == False:
-                            print("cannot moveRight")
+                            #print("cannot moveRight")
                             break
                     k += 1
 
@@ -257,6 +257,9 @@ class Game_Manager(QMainWindow):
                 # if Piece cannot movedown and stack, reset field
                 print("reset field.")
                 self.resetfield()
+
+                BLOCK_CONTROLLER_SAMPLE.update()
+                BLOCK_CONTROLLER_SAMPLE.reset_state()
 
             # init nextMove
             self.nextMove = None
@@ -542,7 +545,7 @@ class Game_Manager(QMainWindow):
             return
 
         key = event.key()
-        
+
         # key event handle process.
         # depends on self.manual, it's better to make key config file.
         #  "y" : PC keyboard controller
@@ -551,7 +554,7 @@ class Game_Manager(QMainWindow):
         if key == Qt.Key_P:
             self.pause()
             return
-            
+
         if self.isPaused:
             return
         elif key == Qt.Key_Left:
@@ -630,7 +633,7 @@ class Board(QFrame):
         self.line = 0
         self.line_score_stat = [0, 0, 0, 0]
         self.reset_cnt = 0
-        self.start_time = time.time() 
+        self.start_time = time.time()
         BOARD_DATA.clear()
         BOARD_DATA.init_randomseed(random_seed_Nextshape)
         BOARD_DATA.init_obstacle_parameter(obstacle_height, obstacle_probability)

@@ -224,7 +224,7 @@ class BoardData(object):
         if self.tryMoveCurrent(self.currentDirection, self.currentX - 1, self.currentY):
             self.currentX -= 1
         else:
-            print("failed to moveLeft..")
+            #print("failed to moveLeft..")
             return False
         return True
 
@@ -232,7 +232,7 @@ class BoardData(object):
         if self.tryMoveCurrent(self.currentDirection, self.currentX + 1, self.currentY):
             self.currentX += 1
         else:
-            print("failed to moveRight..")
+            #print("failed to moveRight..")
             return False
         return True
 
@@ -241,7 +241,7 @@ class BoardData(object):
             self.currentDirection += 1
             self.currentDirection %= 4
         else:
-            print("failed to rotateRight..")
+            #print("failed to rotateRight..")
             return False
         return True
 
@@ -250,7 +250,7 @@ class BoardData(object):
             self.currentDirection -= 1
             self.currentDirection %= 4
         else:
-            print("failed to rotateLeft..")
+            #print("failed to rotateLeft..")
             return False
         return True
 

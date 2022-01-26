@@ -1,0 +1,14 @@
+
+common:
+  dir: outputs/experiment
+  #dir: outputs/${now:%Y-%m-%d}
+  weight_path: trained_model
+  log_path: tensorboard
+  mode: train
+model:
+  name: DQN
+
+train:
+  optimizer: Adam
+  lr: 1e-3
+  replay_memory_size: 30000
