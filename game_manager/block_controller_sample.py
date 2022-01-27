@@ -4,7 +4,19 @@
 from datetime import datetime
 import pprint
 import copy
+
+import torch
+import torch.nn as nn
+from model.deepqnet import DeepQNetwork
+
+from hydra import compose, initialize
+import hydra
+import os
+from tensorboardX import SummaryWriter
+from collections import deque
+from random import random, randint, sample
 import numpy as np
+
 class Block_Controller(object):
 
     # init parameter
@@ -14,57 +26,11 @@ class Block_Controller(object):
     ShapeNone_index = 0
     CurrentShape_class = 0
     NextShape_class = 0
-    def __init__(self):
-        #state_dim =  #direction_range
-        self.point_list = [0.0,100.0,300.0,700.0,1300.0]
-        self.max_point = np.max(self.point_list)
-        self.get_board_width = 10
-        self.get_board_height = 5
-        self.number_shape = 7
-        self.direction_dim = 4
-        self.condition1_dim = 2 #current ,next
-        self.condition2_dim = self.condition1_dim  + 1  #current ,next,direction
 
-        self.filed_dim = self.get_board_width * self.get_board_height
-
-        self.state1_dim = self.condition1_dim + self.filed_dim
-        self.state2_dim = self.condition2_dim + self.filed_dim
-
-
-        self.action_1_dim = self.direction_dim #decide a direction
-        self.action_2_dim = self.get_board_width #decide a x
-
-
-        #initialize_array
-        self.condition_vec1 =np.zeros(self.condition1_dim)
-        self.condition_vec2 =np.zeros(self.condition2_dim)
-
-        self.state1 = np.zeros([self.state1_dim,1]) #52,1
-        self.state2 = np.zeros([self.state2_dim,1]) #53,1
-
-        self.param_action1 = np.random.rand(self.state1_dim, self.action_1_dim)  #52x4
-        self.param_action2 = np.random.rand(self.state2_dim, self.action_2_dim)  #53x10
-        #self.action1_list = []
-        #self.action2_list = []
-
-        self.alpha = 0.5
-        self.gamma = 0.999
-        self.lr = 1e-4
-        self.max_episode_num = 50000
-
-        self.gradient1_list = []
-        self.gradient2_list = []
-
-        self.reward_list = []
-        self.reward_sum_list =[]
-        self.score_list = []
-
-        self.prev_row = 0
-        self.save_epsiod = 200
-        self.episode_score = 0
-        self.episode_iter = 0
-        self.episode_num = 0
-        self.episode_reward = 0.0
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(123)
+    else:
+        torch.manual_seed(123)
 
     # GetNextMove is main function.
     # input
@@ -73,242 +39,301 @@ class Block_Controller(object):
     #                 in detail see the internal GameStatus data.
     # output
     #    nextMove : nextMove structure which includes next shape position and the other.
+
+    def __init__(self):
+        cfg = self.hydra_read()
+
+        os.makedirs(cfg.common.dir,exist_ok=True)
+        os.chdir(cfg.common.dir)
+        os.makedirs(cfg.common.weight_path,exist_ok=True)
+        self.writer = SummaryWriter(cfg.common.log_path)
+        self.saved_path = cfg.common.weight_path
+        self.log = "log.txt"
+        with open(self.log,"w") as f:
+            print("start...", file=f)
+        if cfg.model.name=="DQN":
+            self.model = DeepQNetwork()
+
+        self.lr = cfg.train.lr
+        if cfg.train.optimizer=="Adam":
+            self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+
+        if torch.cuda.is_available():
+            self.model.cuda()
+            state = state.cuda()
+
+        self.mode = cfg.common.mode
+        self.replay_memory_size = cfg.train.replay_memory_size
+        self.replay_memory = deque(maxlen=self.replay_memory_size)
+        self.criterion = nn.MSELoss()
+
+        self.initial_epsilon = 1
+        self.final_epsilon = 1e-3
+        self.num_decay_epochs = 2000
+
+        self.epoch = 0
+        self.num_epochs = 3000
+
+        self.save_interval = 100
+
+        self.height = 22
+        self.width = 10
+        self.batch_size = 512
+
+        self.score = 0
+        self.cleared_lines = 0
+        self.gamma = 0.99
+        self.iter = 0
+        self.state = torch.FloatTensor([0,0,0,0])
+        self.tetrominoes = 0
+        self.penalty = -1
+    #[self.state, reward, next_state]
+    def update(self):
+        self.iter += 1
+        self.score -= 2
+        self.replay_memory[-1][1] = self.penalty
+        if len(self.replay_memory) < self.replay_memory_size / 10:
+            print("================pass================")
+            print("iter: {} ,meory: {}/{} , score: {}, clear line: {}, block: {} ".format(self.iter,
+            len(self.replay_memory),self.replay_memory_size / 10,self.score,self.cleared_lines
+            ,self.tetrominoes ))
+            print("====================================")
+
+        else:
+            print("---update---")
+            self.epoch += 1
+            batch = sample(self.replay_memory, min(len(self.replay_memory),self.batch_size))
+            state_batch, reward_batch, next_state_batch = zip(*batch)
+            state_batch = torch.stack(tuple(state for state in state_batch))
+            reward_batch = torch.from_numpy(np.array(reward_batch, dtype=np.float32)[:, None])
+            next_state_batch = torch.stack(tuple(state for state in next_state_batch))
+            q_values = self.model(state_batch)
+            self.model.eval()
+            with torch.no_grad():
+                next_prediction_batch = self.model(next_state_batch)
+
+            self.model.train()
+            y_batch = torch.cat(
+                tuple(reward if reward<0 else reward + self.gamma * prediction for reward, prediction in
+                      zip(reward_batch, next_prediction_batch)))[:, None]
+
+            self.optimizer.zero_grad()
+            loss = self.criterion(q_values, y_batch)
+            loss.backward()
+            self.optimizer.step()
+            log = "Epoch: {}/{}, Score: {},  block: {},  Cleared lines: {}".format(
+                self.epoch,
+                self.num_epochs,
+                self.score,
+                #final_tetrominoes,
+                self.tetrominoes,
+                self.cleared_lines
+                )
+            print(log)
+            with open(self.log,"a") as f:
+                print(log, file=f)
+    def reset_state(self):
+            self.state = torch.FloatTensor([0,0,0,0])
+            self.score = 0
+            self.cleared_lines = 0
+            self.tetrominoes = 0
+    def hydra_read(self):
+        initialize(config_path="../config", job_name="tetris")
+        cfg = compose(config_name="default")
+        return cfg
+
+    def check_cleared_rows(self,board):
+        board_new = np.copy(board)
+        lines = 0
+        empty_line = np.array([0 for i in range(self.width)])
+        for y in range(self.height - 1, -1, -1):
+            blockCount  = np.sum(board[y])
+            if blockCount == self.width:
+                lines += 1
+                board_new = np.delete(board_new,y,0)
+                board_new = np.vstack([empty_line,board_new ])
+        #if lines > 0:
+        #    self.backBoard = newBackBoard
+        return lines,board_new
+
+    def get_bumpiness_and_height(self,board):
+        mask = board != 0
+        invert_heights = np.where(mask.any(axis=0), np.argmax(mask, axis=0), self.height)
+        heights = self.height - invert_heights
+        total_height = np.sum(heights)
+        currs = heights[:-1]
+        nexts = heights[1:]
+        diffs = np.abs(currs - nexts)
+        total_bumpiness = np.sum(diffs)
+        return total_bumpiness, total_height
+
+    #各列の穴の個数を数える
+    def get_holes(self, board):
+        num_holes = 0
+        for i in range(self.width):
+            col = board[:,i]
+            row = 0
+            while row < self.height and col[row] == 0:
+                row += 1
+            num_holes += len([x for x in col[row + 1:] if x == 0])
+        return num_holes
+
+    def get_state_properties(self, board):
+        lines_cleared, board = self.check_cleared_rows(board)
+        holes = self.get_holes(board)
+        bumpiness, height = self.get_bumpiness_and_height(board)
+        return torch.FloatTensor([lines_cleared, holes, bumpiness, height])
+
+
+    def get_next_states(self,GameStatus):
+        states = {}
+        piece_id =GameStatus["block_info"]["currentShape"]["index"]
+        next_piece_id =GameStatus["block_info"]["nextShape"]["index"]
+        #curr_piece = [row[:] for row in self.piece]
+        if piece_id == 5:  # O piece
+            num_rotations = 1
+        elif piece_id == 1 or piece_id == 6 or piece_id == 7:
+            num_rotations = 2
+        else:
+            num_rotations = 4
+        CurrentShapeDirectionRange = GameStatus["block_info"]["currentShape"]["direction_range"]
+
+        for direction0 in range(num_rotations):
+            x0Min, x0Max = self.getSearchXRange(self.CurrentShape_class, direction0)
+            for x0 in range(x0Min, x0Max):
+                # get board data, as if dropdown block
+                board = self.getBoard(self.board_backboard, self.CurrentShape_class, direction0, x0)
+                board = self.get_reshape_backboard(board)
+                states[(x0, direction0)] = self.get_state_properties(board)
+        return states
+
+            #curr_piece = self.rotate(curr_piece)
+    def get_reshape_backboard(self,board):
+        board = np.array(board)
+        reshape_board = board.reshape(self.height,self.width)
+        reshape_board = np.where(reshape_board>0,1,0)
+        return reshape_board
+
+    def step(self, action):
+        x0, direction0 = action
+        board = self.getBoard(self.board_backboard, self.CurrentShape_class, direction0, x0)
+
+        board = self.get_reshape_backboard(board)
+
+        #board[-1] = [1 for i in range(self.width)]
+        lines_cleared, board = self.check_cleared_rows(board)
+        #print(lines_cleared)
+        #input()
+        score = 1 + (lines_cleared ** 2) * self.width
+        self.score += score
+        self.cleared_lines += lines_cleared
+        self.tetrominoes += 1
+        return score
+
     def GetNextMove(self, nextMove, GameStatus):
 
         t1 = datetime.now()
-        board_width = GameStatus["field_info"]["width"]
-        board_height = GameStatus["field_info"]["height"]
-        game_over_count = GameStatus["judge_info"]["gameover_count"]
-        current_shape_index =GameStatus["block_info"]["currentShape"]["index"]
-        next_shape_index =GameStatus["block_info"]["nextShape"]["index"]
-        reshape_backboard = self.get_reshape_backboard(GameStatus["field_info"]["backboard"],board_height,board_width)
-        reshape_backboard = np.where(reshape_backboard>0,1,0)
-        reshape_backboard_nlines = self.get_backboard_n_lines(reshape_backboard,self.get_board_height)
-        backboard_nlines = reshape_backboard_nlines.flatten()
-
-        #update parameter
-
-        if self.episode_num < game_over_count:
-            print(">>>>Previous score %f"%(self.episode_score))
-            print(">>>>Previous reward %f"%(np.sum(self.reward_list)))
-            self.reward_sum_list.append(np.sum(self.reward_list))
-
-            print(">>>>Update param2")
-            self.param_action1 = self.update_param(self.gradient1_list,self.reward_list,self.param_action1)
-
-            print(">>>>Update param2")
-            self.param_action2 = self.update_param(self.gradient2_list,self.reward_list,self.param_action2)
-
-            print(">>>>Change episode")
-            self.score_list.append(self.episode_score)
-            self.episode_num = game_over_count
-            if (self.episode_num%self.save_epsiod)==0:
-                np.save("weight/parameter1_episode%d"%(self.episode_num),self.param_action1)
-                np.save("weight/parameter2_episode%d"%(self.episode_num),self.param_action2)
-                np.savetxt("reward_sum.csv",self.reward_sum_list)
-
-            if self.episode_num == self.max_episode_num:
-                self.reward_sum_list = np.array(self.reward_sum_list)
-                np.save("weight/parameter1_episode%d"%(self.episode_num),self.param_action1)
-                np.save("weight/parameter2_episode%d"%(self.episode_num),self.param_action2)
-                np.savetxt("reward_sum.csv",self.reward_sum_list)
-                exit()
-
-            #initialize
-            self.episode_score = 0.0
-            self.episode_iter = 0
-            self.reward_list = []
-            self.gradient_list = []
 
         # print GameStatus
         #print("=================================================>")
-        #
-        """
-        #pprint.pprint(GameStatus, width = 61, compact = True)
-        print("epsiode num: %d"%(self.episode_num ))
-        print("epsiode iter: %d"%(self.episode_iter))
-        print("line score %f"%(GameStatus["debug_info"]["linescore"]))
-        print("backboard_nlines:")
-        print(reshape_backboard_nlines)
-        #print(GameStatus["field_info"]["backboard"])
-        print("field_shape:")
-        #print(board_height,board_width)
-        print("current_shape_index %d"%(current_shape_index))
-        print("next_shape_index %d"%(next_shape_index))
-        #print(reshape_backboard_nlines)
-        """
-
-        self.condition_vec1[0] = float(current_shape_index)/self.number_shape
-        self.condition_vec1[1] = float(next_shape_index)/self.number_shape
-
-        self.condition_vec2[0] = float(current_shape_index)/self.number_shape
-        self.condition_vec2[1] = float(next_shape_index)/self.number_shape
-
-        # get data from GameStatus
-        # current shape info
+        self.ind =GameStatus["block_info"]["currentShape"]["index"]
+        self.board_backboard = GameStatus["field_info"]["backboard"]
+        # default board definition
+        self.board_data_width = GameStatus["field_info"]["width"]
+        self.board_data_height = GameStatus["field_info"]["height"]
+        self.CurrentShape_class = GameStatus["block_info"]["currentShape"]["class"]
         CurrentShapeDirectionRange = GameStatus["block_info"]["currentShape"]["direction_range"]
         self.CurrentShape_class = GameStatus["block_info"]["currentShape"]["class"]
         # next shape info
         NextShapeDirectionRange = GameStatus["block_info"]["nextShape"]["direction_range"]
         self.NextShape_class = GameStatus["block_info"]["nextShape"]["class"]
-        # current board info
-        self.board_backboard = GameStatus["field_info"]["backboard"]
-        # default board definition
-        self.board_data_width = GameStatus["field_info"]["width"]
-        self.board_data_height = GameStatus["field_info"]["height"]
         self.ShapeNone_index = GameStatus["debug_info"]["shape_info"]["shapeNone"]["index"]
 
-        # search best nextMove -->
-        strategy = None
 
-        #decide direction0
-        backboard_nlines_with_condition1 =np.append(self.condition_vec1,backboard_nlines)
-        self.state1 = backboard_nlines_with_condition1
-        probs_action1 = self.get_policy(self.state1,self.param_action1)
-        action1 = np.random.choice(self.action_1_dim ,1,p=probs_action1)[0]
+        reshape_backboard = self.get_reshape_backboard(GameStatus["field_info"]["backboard"])
+        #self.crr_backboard = np.where(reshape_backboard>0,1,0)
+        next_steps = self.get_next_states(GameStatus)
+        #next_steps=[]
 
-        #decide x0
-        self.condition_vec2[-1] = action1
-        backboard_nlines_with_condition2 =np.append(self.condition_vec2,backboard_nlines) #1x53
-        self.state2 = backboard_nlines_with_condition2
-        probs_action2 = self.get_policy(self.state2,self.param_action2)
-        x0Min, x0Max = self.getSearchXRange(self.CurrentShape_class, action1)
-        probs_action2[:x0Min]=0
-        probs_action2[x0Max:]=0
-        probs_action2 /=np.sum(probs_action2)
-        action2 = np.random.choice(self.action_2_dim ,1,p=probs_action2)[0]
+        epsilon = self.final_epsilon + (max(self.num_decay_epochs - self.epoch, 0) * (
+                self.initial_epsilon - self.final_epsilon) / self.num_decay_epochs)
+        u = random()
+        random_action = u <= epsilon
+        #action = [x0,direction0]
+        next_actions, next_states = zip(*next_steps.items())
 
+        next_states = torch.stack(next_states)
+        if torch.cuda.is_available():
+            next_states = next_states.cuda()
+        self.model.eval()
+        with torch.no_grad():
+            predictions = self.model(next_states)[:, 0]
 
-        strategy = (action1, action2, 1, 1) #action0=direction0 ,action2=x0
+        self.model.train()
+        if random_action:
+            index = randint(0, len(next_steps) - 1)
+        else:
+            index = torch.argmax(predictions).item()
+        next_state = next_states[index, :]
+        action = next_actions[index]
+        reward = self.step(action)
+        self.replay_memory.append([self.state, reward, next_state])
 
-        #calculate reward
-        board_next = self.getBoard(self.board_backboard, self.CurrentShape_class, strategy[0], strategy[1])
-        board_next_reshape = self.get_reshape_backboard(board_next,board_height,board_width)
-        board_next_reshape = np.where(board_next_reshape>0,1,0)
-        board_next_nlines = self.get_backboard_n_lines(board_next_reshape,self.get_board_height)
-
-        eval_board_h = self.eval_continuous_block_horizontal(board_next_nlines) #eval function1
-
-        fillline = int(self.get_fulllines(board_next_reshape))
-        score = self.point_list[fillline]/self.max_point #eval function2
-
-        top_row = self.get_top_row(board_next_reshape)
-        row_diff = top_row - self.prev_row #eval function3
-
-
-        reward =  np.mean(eval_board_h) + score*100 - 0.1 *row_diff
-        self.prev_row = top_row
-
-        self.reward_list.append(reward)
-        self.episode_score += self.point_list[fillline]
-
-        #=====get gradient=====
-        x_s1_a1 = self.to_one_hot(self.state1,action1,self.state1_dim,self.action_1_dim)#x(s1,a1)
-        x_s2_a2 = self.to_one_hot(self.state2,action2,self.state2_dim,self.action_2_dim)
-
-        expect1 = 0
-        for b in CurrentShapeDirectionRange:
-            x_s1_b= self.to_one_hot(self.state1,
-                                    b,
-                                    self.state1_dim,
-                                    self.action_1_dim)
-            expect1 += probs_action1[b] * x_s1_b
-        grad1 = x_s1_a1 - expect1
-
-        expect2 = 0
-        for b in range(x0Min, x0Max):
-            x_s2_b= self.to_one_hot(self.state2,
-                                    b,
-                                    self.state2_dim,
-                                    self.action_2_dim)
-            expect2 += probs_action2[b] * x_s2_b
-        grad2 = x_s2_a2 - expect2
-
-        self.gradient1_list.append(grad1)
-        self.gradient2_list.append(grad2)
-
-
-        # search best nextMove <--
         #print("===", datetime.now() - t1)
-        nextMove["strategy"]["direction"] = strategy[0]
-        nextMove["strategy"]["x"] = strategy[1]
-        nextMove["strategy"]["y_operation"] = strategy[2]
-        nextMove["strategy"]["y_moveblocknum"] = strategy[3]
+        nextMove["strategy"]["direction"] = action[1]
+        nextMove["strategy"]["x"] = action[0]
+        nextMove["strategy"]["y_operation"] = 1
+        nextMove["strategy"]["y_moveblocknum"] = 1
         #print(nextMove)
         #print("###### SAMPLE CODE ######")
-        self.episode_iter += 1
+        self.state = next_state
+        self.writer.add_scalar('Train/Score', self.score, self.epoch - 1)
+        if self.epoch > 0 and self.epoch % self.save_interval == 0:
+            torch.save(self.model, "{}/tetris_{}".format(self.saved_path, self.epoch))
         return nextMove
 
-    #def eval_continuous_block_horizontal(self,board):
-    def to_one_hot(self,s, a,s_dim ,a_dim):
-        onehot = np.zeros([s_dim, a_dim])
-        onehot[:, a] = s
-        return onehot
-    def update_param(self,grad_list,reward_list,param):
-        gamma = self.gamma
-        lr = self.lr
-        for i in range(len(grad_list)):
-            g = np.sum(r*gamma**tau for tau,r in enumerate(reward_list[i:]))
-            param += lr*g*grad_list[i]
-        return param
-    def get_fulllines(self,board):
-        h,w = board.shape
-        sum_value = np.sum(board,axis=1)
-        lines = np.sum(np.where(sum_value==w,1,0))
-        return lines
+
+        #exit()
+        #reward, done = env.step(action, render=True)
 
 
-    def eval_continuous_block_horizontal(self,board):
-        h,w = board.shape
-        right_shift = np.roll(board,1)
-        right_shift[:,0]=board[:,0]
-        left_shift = np.roll(board,-1)
-        left_shift[:,-1]=board[:,-1]
-        eval_board =  (board + right_shift + left_shift)/3.0
-        eval_board[board==0] =0
-        #eval_board[eval_board<0.5] =0
-        return eval_board
 
-    def eval_continuous_block_vertical(self,board):
-        h,w = board.shape
-        down_shift = np.roll(board,1,axis=0)
-        down_shift[0,:]=board[0,:]
-        up_shift = np.roll(board,-1,axis=0)
-        up_shift[-1,:]=board[-1,:]
-        eval_board =  (board + down_shift + up_shift)/3.0
-        eval_board[board==0] =0
-        return eval_board
+        #
+        """
+        # search best nextMove -->
+        strategy = None
+        LatestEvalValue = -100000
+        # search with current block Shape
+        for direction0 in CurrentShapeDirectionRange:
+            # search with x range
+            x0Min, x0Max = self.getSearchXRange(self.CurrentShape_class, direction0)
+            print("xmin",x0Min)
+            print("xmax",x0Max)
+            for x0 in range(x0Min, x0Max):
+                # get board data, as if dropdown block
+                board = self.getBoard(self.board_backboard, self.CurrentShape_class, direction0, x0)
+                # evaluate board
+                EvalValue = self.calcEvaluationValueSample(board)
+                # update best move
+                if EvalValue > LatestEvalValue:
+                    strategy = (direction0, x0, 1, 1)
+                    LatestEvalValue = EvalValue
 
-    def softmax(self,x):
-        x = np.exp(x - np.max(x))
-        return x / x.sum()
+                ###test
+                ###for direction1 in NextShapeDirectionRange:
+                ###  x1Min, x1Max = self.getSearchXRange(self.NextShape_class, direction1)
+                ###  for x1 in range(x1Min, x1Max):
+                ###        board2 = self.getBoard(board, self.NextShape_class, direction1, x1)
+                ###        EvalValue = self.calcEvaluationValueSample(board2)
+                ###        if EvalValue > LatestEvalValue:
+                ###            strategy = (direction0, x0, 1, 1)
+                ###            LatestEvalValue = EvalValue
+        # search best nextMove <--
+        """
 
-    def get_policy(self,state, theta):
-        z = np.dot(theta.T,state)
-        return self.softmax(z)
 
-    def get_reshape_backboard(self,board,height,width):
-        board = np.array(board)
-        reshape_board = board.reshape(height,width)
-        return reshape_board
-    def get_top_row(self,board):
-        h,w = board.shape
-        board_one_line = np.sum(board,axis=1)
-        index = np.where(board_one_line>0)[0]
-        top_index=index[0]
-        return h - top_index
 
-    def get_backboard_n_lines(self,board,n):
-        board_one_line = np.sum(board,axis=1)
-        h,w = board.shape
-        index = np.where(board_one_line>0)[0]
-        if len(index)==0:
-            board_nline = board[h-n:h,:]
-        else:
-            top_index = index[0]
-            top_index = h-n if top_index+n > h else top_index
-            board_nline = board[top_index:top_index+n,:]
-        return board_nline
+
 
     def getSearchXRange(self, Shape_class, direction):
         #
@@ -335,7 +360,6 @@ class Block_Controller(object):
         board = copy.deepcopy(board_backboard)
         _board = self.dropDown(board, Shape_class, direction, x)
         return _board
-
 
     def dropDown(self, board, Shape_class, direction, x):
         #
@@ -452,7 +476,7 @@ class Block_Controller(object):
         score = score + fullLines * 10.0           # try to delete line
         score = score - nHoles * 1.0               # try not to make hole
         score = score - nIsolatedBlocks * 1.0      # try not to make isolated block
-        #score = score - absDy * 1.0                # try to put block smoothly
+        score = score - absDy * 1.0                # try to put block smoothly
         #score = score - maxDy * 0.3                # maxDy
         #score = score - maxHeight * 5              # maxHeight
         #score = score - stdY * 1.0                 # statistical data
