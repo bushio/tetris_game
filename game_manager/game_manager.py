@@ -41,6 +41,7 @@ def get_option(game_time, manual, use_sample, drop_speed, random_seed, obstacle_
     argparser.add_argument('--resultlogjson', type=str,
                            default=resultlogjson,
                            help='result json log file path')
+
     return argparser.parse_args()
 
 class Game_Manager(QMainWindow):

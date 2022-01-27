@@ -44,15 +44,18 @@ class Block_Controller(object):
         cfg = self.hydra_read()
 
         os.makedirs(cfg.common.dir,exist_ok=True)
-        os.chdir(cfg.common.dir)
-        os.makedirs(cfg.common.weight_path,exist_ok=True)
-        self.writer = SummaryWriter(cfg.common.log_path)
-        self.saved_path = cfg.common.weight_path
-        self.log = "log.txt"
+        self.saved_path = cfg.common.dir + "/" + cfg.common.weight_path
+        os.makedirs(self.saved_path ,exist_ok=True)
+        self.writer = SummaryWriter(cfg.common.dir+"/"+cfg.common.log_path)
+
+        self.log = cfg.common.dir+"/log.txt"
+
+        self.state_dim = cfg.state.dim
+
         with open(self.log,"w") as f:
             print("start...", file=f)
         if cfg.model.name=="DQN":
-            self.model = DeepQNetwork()
+            self.model = DeepQNetwork(self.state_dim )
 
         self.lr = cfg.train.lr
         if cfg.train.optimizer=="Adam":
@@ -63,6 +66,10 @@ class Block_Controller(object):
             state = state.cuda()
 
         self.mode = cfg.common.mode
+
+        if self.mode!="train":
+            self.model = torch.load(cfg.common.load_weight)
+
         self.replay_memory_size = cfg.train.replay_memory_size
         self.replay_memory = deque(maxlen=self.replay_memory_size)
         self.criterion = nn.MSELoss()
@@ -84,60 +91,79 @@ class Block_Controller(object):
         self.cleared_lines = 0
         self.gamma = 0.99
         self.iter = 0
-        self.state = torch.FloatTensor([0,0,0,0])
+
+
+        if self.state_dim  ==5:
+            self.state = torch.FloatTensor([0,0,0,0,0])
+        else:
+            self.state = torch.FloatTensor([0,0,0,0])
         self.tetrominoes = 0
         self.penalty = -1
     #[self.state, reward, next_state]
     def update(self):
-        self.iter += 1
-        self.score -= 2
-        self.replay_memory[-1][1] = self.penalty
-        if len(self.replay_memory) < self.replay_memory_size / 10:
-            print("================pass================")
-            print("iter: {} ,meory: {}/{} , score: {}, clear line: {}, block: {} ".format(self.iter,
-            len(self.replay_memory),self.replay_memory_size / 10,self.score,self.cleared_lines
-            ,self.tetrominoes ))
-            print("====================================")
+        if self.mode=="train":
+            self.score -= 2
+            self.replay_memory[-1][1] = self.penalty
+            if len(self.replay_memory) < self.replay_memory_size / 10:
+                print("================pass================")
+                print("iter: {} ,meory: {}/{} , score: {}, clear line: {}, block: {} ".format(self.iter,
+                len(self.replay_memory),self.replay_memory_size / 10,self.score,self.cleared_lines
+                ,self.tetrominoes ))
+                print("====================================")
+            else:
+                print("---update---")
+                self.epoch += 1
+                batch = sample(self.replay_memory, min(len(self.replay_memory),self.batch_size))
+                state_batch, reward_batch, next_state_batch = zip(*batch)
+                state_batch = torch.stack(tuple(state for state in state_batch))
+                reward_batch = torch.from_numpy(np.array(reward_batch, dtype=np.float32)[:, None])
+                next_state_batch = torch.stack(tuple(state for state in next_state_batch))
+                q_values = self.model(state_batch)
+                self.model.eval()
+                with torch.no_grad():
+                    next_prediction_batch = self.model(next_state_batch)
 
+                self.model.train()
+                y_batch = torch.cat(
+                    tuple(reward if reward<0 else reward + self.gamma * prediction for reward, prediction in
+                          zip(reward_batch, next_prediction_batch)))[:, None]
+
+                self.optimizer.zero_grad()
+                loss = self.criterion(q_values, y_batch)
+                loss.backward()
+                self.optimizer.step()
+                log = "Epoch: {} / {}, Score: {},  block: {},  Cleared lines: {}".format(
+                    self.epoch,
+                    self.num_epochs,
+                    self.score,
+                    #final_tetrominoes,
+                    self.tetrominoes,
+                    self.cleared_lines
+                    )
+                print(log)
+                with open(self.log,"a") as f:
+                    print(log, file=f)
+            if self.epoch > self.num_epochs:
+                with open(self.log,"a") as f:
+                    print("finish..", file=f)
+                exit()
         else:
-            print("---update---")
             self.epoch += 1
-            batch = sample(self.replay_memory, min(len(self.replay_memory),self.batch_size))
-            state_batch, reward_batch, next_state_batch = zip(*batch)
-            state_batch = torch.stack(tuple(state for state in state_batch))
-            reward_batch = torch.from_numpy(np.array(reward_batch, dtype=np.float32)[:, None])
-            next_state_batch = torch.stack(tuple(state for state in next_state_batch))
-            q_values = self.model(state_batch)
-            self.model.eval()
-            with torch.no_grad():
-                next_prediction_batch = self.model(next_state_batch)
-
-            self.model.train()
-            y_batch = torch.cat(
-                tuple(reward if reward<0 else reward + self.gamma * prediction for reward, prediction in
-                      zip(reward_batch, next_prediction_batch)))[:, None]
-
-            self.optimizer.zero_grad()
-            loss = self.criterion(q_values, y_batch)
-            loss.backward()
-            self.optimizer.step()
             log = "Epoch: {} / {}, Score: {},  block: {},  Cleared lines: {}".format(
-                self.epoch,
-                self.num_epochs,
-                self.score,
-                #final_tetrominoes,
-                self.tetrominoes,
-                self.cleared_lines
-                )
-            print(log)
-            with open(self.log,"a") as f:
-                print(log, file=f)
-        if self.epoch > self.num_epochs:
-            with open(self.log,"a") as f:
-                print("finish..", file=f)
-            exit()
+            self.epoch,
+            self.num_epochs,
+            self.score,
+            #final_tetrominoes,
+            self.tetrominoes,
+            self.cleared_lines
+            )
+            pass
+
     def reset_state(self):
-            self.state = torch.FloatTensor([0,0,0,0])
+            if self.state_dim  ==5:
+                self.state = torch.FloatTensor([0,0,0,0,0])
+            else:
+                self.state = torch.FloatTensor([0,0,0,0])
             self.score = 0
             self.cleared_lines = 0
             self.tetrominoes = 0
@@ -186,8 +212,23 @@ class Block_Controller(object):
         lines_cleared, board = self.check_cleared_rows(board)
         holes = self.get_holes(board)
         bumpiness, height = self.get_bumpiness_and_height(board)
+
         return torch.FloatTensor([lines_cleared, holes, bumpiness, height])
 
+    def get_state_properties_v2(self, board):
+        lines_cleared, board = self.check_cleared_rows(board)
+        holes = self.get_holes(board)
+        bumpiness, height = self.get_bumpiness_and_height(board)
+        max_row = self.get_max_height(board)
+        return torch.FloatTensor([lines_cleared, holes, bumpiness, height,max_row])
+
+
+    def get_max_height(self, board):
+        sum_ = np.sum(board,axis=1)
+        row = 0
+        while row < self.height and sum_[row] ==0:
+            row += 1
+        return self.height - row
 
     def get_next_states(self,GameStatus):
         states = {}
@@ -208,7 +249,11 @@ class Block_Controller(object):
                 # get board data, as if dropdown block
                 board = self.getBoard(self.board_backboard, self.CurrentShape_class, direction0, x0)
                 board = self.get_reshape_backboard(board)
-                states[(x0, direction0)] = self.get_state_properties(board)
+                if self.state_dim==5:
+                    states[(x0, direction0)] = self.get_state_properties_v2(board)
+                else:
+                    states[(x0, direction0)] = self.get_state_properties(board)
+
         return states
 
             #curr_piece = self.rotate(curr_piece)
@@ -255,89 +300,63 @@ class Block_Controller(object):
 
 
         reshape_backboard = self.get_reshape_backboard(GameStatus["field_info"]["backboard"])
+
+
+
         #self.crr_backboard = np.where(reshape_backboard>0,1,0)
         next_steps = self.get_next_states(GameStatus)
         #next_steps=[]
+        if self.mode=="train":
+            epsilon = self.final_epsilon + (max(self.num_decay_epochs - self.epoch, 0) * (
+                    self.initial_epsilon - self.final_epsilon) / self.num_decay_epochs)
+            u = random()
+            random_action = u <= epsilon
+            #action = [x0,direction0]
+            next_actions, next_states = zip(*next_steps.items())
 
-        epsilon = self.final_epsilon + (max(self.num_decay_epochs - self.epoch, 0) * (
-                self.initial_epsilon - self.final_epsilon) / self.num_decay_epochs)
-        u = random()
-        random_action = u <= epsilon
-        #action = [x0,direction0]
-        next_actions, next_states = zip(*next_steps.items())
+            next_states = torch.stack(next_states)
+            if torch.cuda.is_available():
+                next_states = next_states.cuda()
+            self.model.eval()
+            with torch.no_grad():
+                predictions = self.model(next_states)[:, 0]
 
-        next_states = torch.stack(next_states)
-        if torch.cuda.is_available():
-            next_states = next_states.cuda()
-        self.model.eval()
-        with torch.no_grad():
-            predictions = self.model(next_states)[:, 0]
+            self.model.train()
+            if random_action:
+                index = randint(0, len(next_steps) - 1)
+            else:
+                index = torch.argmax(predictions).item()
+            next_state = next_states[index, :]
+            action = next_actions[index]
+            reward = self.step(action)
+            self.replay_memory.append([self.state, reward, next_state])
 
-        self.model.train()
-        if random_action:
-            index = randint(0, len(next_steps) - 1)
+            #print("===", datetime.now() - t1)
+            nextMove["strategy"]["direction"] = action[1]
+            nextMove["strategy"]["x"] = action[0]
+            nextMove["strategy"]["y_operation"] = 1
+            nextMove["strategy"]["y_moveblocknum"] = 1
+            #print(nextMove)
+            #print("###### SAMPLE CODE ######")
+            self.state = next_state
+            self.writer.add_scalar('Train/Score', self.score, self.epoch - 1)
+            if self.epoch > 0 and self.epoch % self.save_interval == 0:
+                torch.save(self.model, "{}/tetris_{}".format(self.saved_path, self.epoch))
         else:
+            self.model.eval()
+            next_actions, next_states = zip(*next_steps.items())
+            next_states = torch.stack(next_states)
+            predictions = self.model(next_states)[:, 0]
             index = torch.argmax(predictions).item()
-        next_state = next_states[index, :]
-        action = next_actions[index]
-        reward = self.step(action)
-        self.replay_memory.append([self.state, reward, next_state])
-
-        #print("===", datetime.now() - t1)
-        nextMove["strategy"]["direction"] = action[1]
-        nextMove["strategy"]["x"] = action[0]
-        nextMove["strategy"]["y_operation"] = 1
-        nextMove["strategy"]["y_moveblocknum"] = 1
-        #print(nextMove)
-        #print("###### SAMPLE CODE ######")
-        self.state = next_state
-        self.writer.add_scalar('Train/Score', self.score, self.epoch - 1)
-        if self.epoch > 0 and self.epoch % self.save_interval == 0:
-            torch.save(self.model, "{}/tetris_{}".format(self.saved_path, self.epoch))
+            action = next_actions[index]
+            nextMove["strategy"]["direction"] = action[1]
+            nextMove["strategy"]["x"] = action[0]
+            nextMove["strategy"]["y_operation"] = 1
+            nextMove["strategy"]["y_moveblocknum"] = 1
         return nextMove
-
 
         #exit()
         #reward, done = env.step(action, render=True)
-
-
-
-        #
-        """
-        # search best nextMove -->
-        strategy = None
-        LatestEvalValue = -100000
-        # search with current block Shape
-        for direction0 in CurrentShapeDirectionRange:
-            # search with x range
-            x0Min, x0Max = self.getSearchXRange(self.CurrentShape_class, direction0)
-            print("xmin",x0Min)
-            print("xmax",x0Max)
-            for x0 in range(x0Min, x0Max):
-                # get board data, as if dropdown block
-                board = self.getBoard(self.board_backboard, self.CurrentShape_class, direction0, x0)
-                # evaluate board
-                EvalValue = self.calcEvaluationValueSample(board)
-                # update best move
-                if EvalValue > LatestEvalValue:
-                    strategy = (direction0, x0, 1, 1)
-                    LatestEvalValue = EvalValue
-
-                ###test
-                ###for direction1 in NextShapeDirectionRange:
-                ###  x1Min, x1Max = self.getSearchXRange(self.NextShape_class, direction1)
-                ###  for x1 in range(x1Min, x1Max):
-                ###        board2 = self.getBoard(board, self.NextShape_class, direction1, x1)
-                ###        EvalValue = self.calcEvaluationValueSample(board2)
-                ###        if EvalValue > LatestEvalValue:
-                ###            strategy = (direction0, x0, 1, 1)
-                ###            LatestEvalValue = EvalValue
-        # search best nextMove <--
-        """
-
-
-
-
 
     def getSearchXRange(self, Shape_class, direction):
         #

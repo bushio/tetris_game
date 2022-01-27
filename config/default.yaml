@@ -1,13 +1,17 @@
 
 common:
-  dir: outputs/experiment
+  #dir: outputs/experiment
   #dir: outputs/${now:%Y-%m-%d}
+  dir: outputs/experiment_dim5_20220127
   weight_path: trained_model
+  load_weight: outputs/ex20220126/trained_model/tetris_2200
   log_path: tensorboard
   mode: train
+  #mode: test
 model:
   name: DQN
-
+state:
+  dim: 5
 train:
   optimizer: Adam
   lr: 1e-3

@@ -5,7 +5,7 @@ VALUE_L="2"
 IS_MANUAL_CONTROLL="n"
 IS_SAMPLE_CONTROLL="y"
 #GAME_TIME="-1" #"180"                  # game time (s)
-GAME_TIME="180"
+GAME_TIME="-1"
 RESULT_LOG_JSON="result.json"    # result log file
 
 ## get args level setting
@@ -23,8 +23,8 @@ echo "level: $VALUE_L"
 echo "is_manual_controll: $IS_MANUAL_CONTROLL"
 
 ## set field parameter for level 1
-#DROP_SPEED="50"        # drop speed (s)
-DROP_SPEED="1000"        # drop speed (s)
+DROP_SPEED="50"        # drop speed (s)
+#DROP_SPEED="1000"        # drop speed (s)
 RANDOM_SEED="1"          # random seed for field
 OBSTACLE_HEIGHT="0"      # obstacle height (blocks)
 OBSTACLE_PROBABILITY="0" # obstacle probability (percent)
