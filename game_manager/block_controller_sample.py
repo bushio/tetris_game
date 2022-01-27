@@ -121,7 +121,7 @@ class Block_Controller(object):
             loss = self.criterion(q_values, y_batch)
             loss.backward()
             self.optimizer.step()
-            log = "Epoch: {}/{}, Score: {},  block: {},  Cleared lines: {}".format(
+            log = "Epoch: {} / {}, Score: {},  block: {},  Cleared lines: {}".format(
                 self.epoch,
                 self.num_epochs,
                 self.score,
@@ -132,6 +132,10 @@ class Block_Controller(object):
             print(log)
             with open(self.log,"a") as f:
                 print(log, file=f)
+        if self.epoch > self.num_epochs:
+            with open(self.log,"a") as f:
+                print("finish..", file=f)
+            exit()
     def reset_state(self):
             self.state = torch.FloatTensor([0,0,0,0])
             self.score = 0
