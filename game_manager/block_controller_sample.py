@@ -49,11 +49,20 @@ class Block_Controller(object):
         self.writer = SummaryWriter(cfg.common.dir+"/"+cfg.common.log_path)
 
         self.log = cfg.common.dir+"/log.txt"
+        self.log_score = cfg.common.dir+"/score.txt"
+        self.log_reward = cfg.common.dir+"/reward.txt"
 
         self.state_dim = cfg.state.dim
 
         with open(self.log,"w") as f:
             print("start...", file=f)
+
+        with open(self.log_score,"w") as f:
+            print(0, file=f)
+
+        with open(self.log_reward,"w") as f:
+            print(0, file=f)
+
         if cfg.model.name=="DQN":
             self.model = DeepQNetwork(self.state_dim )
 
@@ -74,35 +83,47 @@ class Block_Controller(object):
         self.replay_memory = deque(maxlen=self.replay_memory_size)
         self.criterion = nn.MSELoss()
 
-        self.initial_epsilon = 1
-        self.final_epsilon = 1e-3
-        self.num_decay_epochs = 2000
+        self.initial_epsilon = cfg.train.initial_epsilon
+        self.final_epsilon = cfg.train.final_epsilon
+        self.num_decay_epochs = cfg.train.num_decay_epochs
 
-        self.epoch = 0
-        self.num_epochs = 3000
 
-        self.save_interval = 100
+        self.num_epochs = cfg.train.num_epoch
+        self.save_interval = cfg.train.save_interval
+        self.gamma = cfg.train.gamma
+        self.batch_size = cfg.train.batch_size
 
         self.height = 22
         self.width = 10
-        self.batch_size = 512
-
+        self.epoch = 0
         self.score = 0
+        self.max_score = -99999
+        self.epoch_reward = 0
         self.cleared_lines = 0
-        self.gamma = 0.99
         self.iter = 0
-
 
         if self.state_dim  ==5:
             self.state = torch.FloatTensor([0,0,0,0,0])
         else:
             self.state = torch.FloatTensor([0,0,0,0])
         self.tetrominoes = 0
-        self.penalty = -1
+
+
+        self.reward_clipping = cfg.train.reward_clipping
+
+        self.score_list = cfg.tetris.score_list
+        self.rewad_list = [0,self.score_list[1],self.score_list[2],self.score_list[3],self.score_list[4]]
+        self.penalty = self.score_list[5]
+        if self.reward_clipping:
+            self.norm_num =max(max(self.rewad_list),abs(self.penalty))
+            self.penalty /= self.norm_num
+            self.rewad_list =[r/self.norm_num for r in self.rewad_list]
+
+
     #[self.state, reward, next_state]
     def update(self):
         if self.mode=="train":
-            self.score -= 2
+            self.score += self.score_list[5]
             self.replay_memory[-1][1] = self.penalty
             if len(self.replay_memory) < self.replay_memory_size / 10:
                 print("================pass================")
@@ -143,29 +164,40 @@ class Block_Controller(object):
                 print(log)
                 with open(self.log,"a") as f:
                     print(log, file=f)
+                with open(self.log_score,"a") as f:
+                    print(self.score, file=f)
+
+                with open(self.log_reward,"a") as f:
+                    print(self.epoch_reward, file=f)
             if self.epoch > self.num_epochs:
                 with open(self.log,"a") as f:
                     print("finish..", file=f)
                 exit()
         else:
             self.epoch += 1
-            log = "Epoch: {} / {}, Score: {},  block: {},  Cleared lines: {}".format(
+            log = "Epoch: {} / {}, Score: {},  block: {}, Reward: {}  Cleared lines: {}".format(
             self.epoch,
             self.num_epochs,
             self.score,
             #final_tetrominoes,
             self.tetrominoes,
+            self.epoch_reward,
             self.cleared_lines
             )
             pass
 
     def reset_state(self):
+            if self.score > self.max_score:
+                torch.save(self.model, "{}/tetris_epoch_{}_score{}".format(self.saved_path,self.epoch,self.score))
+                self.max_score  =  self.score
+
             if self.state_dim  ==5:
                 self.state = torch.FloatTensor([0,0,0,0,0])
             else:
                 self.state = torch.FloatTensor([0,0,0,0])
             self.score = 0
             self.cleared_lines = 0
+            self.epoch_reward = 0
             self.tetrominoes = 0
     def hydra_read(self):
         initialize(config_path="../config", job_name="tetris")
@@ -273,11 +305,13 @@ class Block_Controller(object):
         lines_cleared, board = self.check_cleared_rows(board)
         #print(lines_cleared)
         #input()
-        score = 1 + (lines_cleared ** 2) * self.width
-        self.score += score
+        #score = 1 + (lines_cleared ** 2) * self.width
+        reward = self.rewad_list[lines_cleared]
+        self.epoch_reward += reward
+        self.score += self.score_list[lines_cleared]
         self.cleared_lines += lines_cleared
         self.tetrominoes += 1
-        return score
+        return reward
 
     def GetNextMove(self, nextMove, GameStatus):
 
@@ -340,8 +374,6 @@ class Block_Controller(object):
             #print("###### SAMPLE CODE ######")
             self.state = next_state
             self.writer.add_scalar('Train/Score', self.score, self.epoch - 1)
-            if self.epoch > 0 and self.epoch % self.save_interval == 0:
-                torch.save(self.model, "{}/tetris_{}".format(self.saved_path, self.epoch))
         else:
             self.model.eval()
             next_actions, next_states = zip(*next_steps.items())
