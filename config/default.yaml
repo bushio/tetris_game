@@ -33,3 +33,4 @@ tetris:
     - 700
     - 1300
     - -1300
+  max_tetrominoes: 500

@@ -254,7 +254,7 @@ class Game_Manager(QMainWindow):
             self.UpdateScore(removedlines, dropdownlines)
 
             # check reset field
-            if BOARD_DATA.currentY < 1:
+            if BOARD_DATA.currentY < 1 or BLOCK_CONTROLLER_SAMPLE.tetrominoes > BLOCK_CONTROLLER_SAMPLE.max_tetrominoes:
                 # if Piece cannot movedown and stack, reset field
                 print("reset field.")
                 self.resetfield()

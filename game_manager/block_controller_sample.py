@@ -98,6 +98,7 @@ class Block_Controller(object):
         self.epoch = 0
         self.score = 0
         self.max_score = -99999
+        self.max_tetrominoes = cfg.tetris.max_tetrominoes
         self.epoch_reward = 0
         self.cleared_lines = 0
         self.iter = 0
