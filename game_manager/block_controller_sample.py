@@ -16,7 +16,7 @@ from tensorboardX import SummaryWriter
 from collections import deque
 from random import random, randint, sample
 import numpy as np
-
+from omegaconf import DictConfig, OmegaConf
 class Block_Controller(object):
 
     # init parameter
@@ -41,16 +41,19 @@ class Block_Controller(object):
     #    nextMove : nextMove structure which includes next shape position and the other.
 
     def __init__(self):
-        cfg = self.hydra_read()
 
+        cfg = self.hydra_read()
         os.makedirs(cfg.common.dir,exist_ok=True)
         self.saved_path = cfg.common.dir + "/" + cfg.common.weight_path
         os.makedirs(self.saved_path ,exist_ok=True)
         self.writer = SummaryWriter(cfg.common.dir+"/"+cfg.common.log_path)
+        with open(cfg.common.dir+"/config.yaml","w") as f:
+            print(OmegaConf.to_yaml(cfg),file=f)
 
         self.log = cfg.common.dir+"/log.txt"
         self.log_score = cfg.common.dir+"/score.txt"
         self.log_reward = cfg.common.dir+"/reward.txt"
+
 
         self.state_dim = cfg.state.dim
 
@@ -200,9 +203,11 @@ class Block_Controller(object):
             self.cleared_lines = 0
             self.epoch_reward = 0
             self.tetrominoes = 0
+
     def hydra_read(self):
         initialize(config_path="../config", job_name="tetris")
         cfg = compose(config_name="default")
+
         return cfg
 
     def check_cleared_rows(self,board):

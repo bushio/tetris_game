@@ -1,7 +1,7 @@
 
 common:
   #dir: outputs/experiment
-  dir: outputs/${now:%Y-%m-%d}_game_over
+  dir: outputs/${now:%Y-%m-%d}
   #dir: outputs/experiment_dim5_20220127_v3
   weight_path: trained_model
   load_weight:
