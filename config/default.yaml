@@ -1,14 +1,9 @@
-
 common:
-  #dir: outputs/experiment
-  dir: outputs/${now:%Y-%m-%d}
-  #dir: outputs/experiment_dim5_20220127_v3
+  dir: outputs/${now:%Y-%m-%d}_target
   weight_path: trained_model
-  load_weight:
+  load_weight: outputs/sample/trained_model/tetris_epoch_4282_score160800
   log_path: tensorboard
-  mode: train
-
-  #mode: test
+  mode: test
 model:
   name: DQN
 state:
@@ -25,8 +20,8 @@ train:
   final_epsilon: 1e-3
   batch_size: 512
   gamma: 0.99
-  target_net: True
-  target_update_interval: 250
+  target_net: False
+  target_update_interval: 100
 tetris:
   score_list:
     - 0
