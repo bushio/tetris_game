@@ -69,6 +69,11 @@ class Block_Controller(object):
         if cfg.model.name=="DQN":
             self.model = DeepQNetwork(self.state_dim )
 
+        self.target_net = cfg.train.target_net
+        if self.target_net:
+            self.target_model = copy.copy(self.model)
+        self.target_update_interval = cfg.train.target_update_interval
+
         self.lr = cfg.train.lr
         if cfg.train.optimizer=="Adam":
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
@@ -137,14 +142,18 @@ class Block_Controller(object):
                 print("====================================")
             else:
                 print("---update---")
-                self.epoch += 1
                 batch = sample(self.replay_memory, min(len(self.replay_memory),self.batch_size))
                 state_batch, reward_batch, next_state_batch = zip(*batch)
                 state_batch = torch.stack(tuple(state for state in state_batch))
                 reward_batch = torch.from_numpy(np.array(reward_batch, dtype=np.float32)[:, None])
                 next_state_batch = torch.stack(tuple(state for state in next_state_batch))
-                q_values = self.model(state_batch)
+
                 self.model.eval()
+                if self.target_net:
+                    q_values = self.target_model(state_batch)
+                else:
+                    q_values = self.model(state_batch)
+
                 with torch.no_grad():
                     next_prediction_batch = self.model(next_state_batch)
 
@@ -157,6 +166,11 @@ class Block_Controller(object):
                 loss = self.criterion(q_values, y_batch)
                 loss.backward()
                 self.optimizer.step()
+
+                if (self.epoch % self.target_update_interval)==0 and self.target_net:
+                    print("====target_net update...====")
+                    self.target_model.load_state_dict(self.model.state_dict())
+
                 log = "Epoch: {} / {}, Score: {},  block: {},  Cleared lines: {}".format(
                     self.epoch,
                     self.num_epochs,
@@ -173,12 +187,13 @@ class Block_Controller(object):
 
                 with open(self.log_reward,"a") as f:
                     print(self.epoch_reward, file=f)
+
             if self.epoch > self.num_epochs:
                 with open(self.log,"a") as f:
                     print("finish..", file=f)
                 exit()
-        else:
             self.epoch += 1
+        else:
             log = "Epoch: {} / {}, Score: {},  block: {}, Reward: {}  Cleared lines: {}".format(
             self.epoch,
             self.num_epochs,
@@ -189,6 +204,7 @@ class Block_Controller(object):
             self.cleared_lines
             )
             pass
+            self.epoch += 1
 
     def reset_state(self):
             if self.score > self.max_score:

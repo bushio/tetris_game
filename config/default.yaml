@@ -25,6 +25,8 @@ train:
   final_epsilon: 1e-3
   batch_size: 512
   gamma: 0.99
+  target_net: True
+  target_update_interval: 250
 tetris:
   score_list:
     - 0
